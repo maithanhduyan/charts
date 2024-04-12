@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Investment Portfolio</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <canvas id="myChart" width="400" height="200"></canvas>
+    <script>
+        var ctx = document.getElementById('myChart').getContext('2d');
+
+        axios.get('https://api.coingecko.com/api/v3/coins/bitcoin/ohlc?vs_currency=usd&days=30')
+            .then(function (response) {
+                var ohlcData = response.data.map(function(value) {
+                    return {
+                        t: value[0],
+                        o: value[1],
+                        h: value[2],
+                        l: value[3],
+                        c: value[4]
+                    };
+                });
+
+                var myChart = new Chart(ctx, {
+                    type: 'candlestick',
+                    data: {
+                        datasets: [{
+                            label: 'BTC',
+                            data: ohlcData,
+                            borderColor: function(context) {
+                                var index = context.dataIndex;
+                                var value = context.dataset.data[index];
+                                return value.o < value.c ? 'green' : 'red'
+                            },
+                            backgroundColor: function(context) {
+                                var index = context.dataIndex;
+                                var value = context.dataset.data[index];
+                                return value.o < value.c ? 'green' : 'red'
+                            }
+                        }]
+                    }
+                });
+            })
+            .catch(function (error) {
+                console.log(error);
+            });
+    </script>
+</body>
+</html>

@@ -1,0 +1,601 @@
+
+  <!DOCTYPE html>
+  <html lang="en">
+  <body>
+  <script src="https://unpkg.com/gojs@2.3.14/release/go.js"></script>
+  <p>
+    This is a minimalist HTML and JavaScript skeleton of the GoJS Sample
+    <a href="https://gojs.net/latest/samples/sankey.html">sankey.html</a>. It was automatically generated from a button on the sample page,
+    and does not contain the full HTML. It is intended as a starting point to adapt for your own usage.
+    For many samples, you may need to inspect the
+    <a href="https://github.com/NorthwoodsSoftware/GoJS/blob/master/samples/sankey.html">full source on Github</a>
+    and copy other files or scripts.
+  </p>
+  <div id="allSampleContent" class="p-4 w-full">
+    <script id="code">
+  class SankeyLayout extends go.LayeredDigraphLayout {
+    constructor() {
+      super();
+      this.alignOption = go.LayeredDigraphLayout.AlignAll;
+    }
+    // determine the desired height of each node/vertex,
+    // based on the thicknesses of the connected links;
+    // actually modify the height of each node's SHAPE
+    makeNetwork(coll) {
+      var net = super.makeNetwork(coll);
+      this.diagram.nodes.each(node => {
+        // figure out how tall the node's bar should be
+        var height = this.getAutoHeightForNode(node);
+        var shape = node.findObject("SHAPE");
+        if (shape) shape.height = height;
+        var text = node.findObject("TEXT");
+        var ltext = node.findObject("LTEXT");
+        var font = "bold " + Math.max(12, Math.round(height / 8)) + "pt Segoe UI, sans-serif"
+        if (text) text.font = font;
+        if (ltext) ltext.font = font;
+        // and update the vertex's dimensions accordingly
+        var v = net.findVertex(node);
+        if (v !== null) {
+          node.ensureBounds();
+          var r = node.actualBounds;
+          v.width = r.width;
+          v.height = r.height;
+          v.focusY = v.height/2;
+        }
+      });
+      return net;
+    }
+
+    getAutoHeightForNode(node) {
+      var heightIn = 0;
+      var it = node.findLinksInto()
+      while (it.next()) {
+        var link = it.value;
+        heightIn += link.computeThickness();
+      }
+      var heightOut = 0;
+      var it = node.findLinksOutOf()
+      while (it.next()) {
+        var link = it.value;
+        heightOut += link.computeThickness();
+      }
+      var h = Math.max(heightIn, heightOut);
+      if (h < 10) h = 10;
+      return h;
+    }
+
+    // treat dummy vertexes as having the thickness of the link that they are in
+    nodeMinColumnSpace(v, topleft) {
+      if (v.node === null) {
+        if (v.edgesCount >= 1) {
+          var max = 1;
+          var it = v.edges;
+          while (it.next()) {
+            var edge = it.value;
+            if (edge.link != null) {
+              var t = edge.link.computeThickness();
+              if (t > max) max = t;
+              break;
+            }
+          }
+          return Math.max(2, Math.ceil(max / this.columnSpacing));
+        }
+        return 2;
+      }
+      return super.nodeMinColumnSpace(v, topleft);
+    }
+
+    // treat dummy vertexes as being thicker, so that the Bezier curves are gentler
+    nodeMinLayerSpace(v, topleft) {
+      if (v.node === null) return 100;
+      return super.nodeMinLayerSpace(v, topleft);
+    }
+
+    assignLayers() {
+      super.assignLayers();
+      var maxlayer = this.maxLayer;
+      // now make sure every vertex with no outputs is maxlayer
+      for (var it = this.network.vertexes.iterator; it.next();) {
+        var v = it.value;
+        var node = v.node;
+        if (v.destinationVertexes.count == 0) {
+          v.layer = 0;
+        }
+        if (v.sourceVertexes.count == 0) {
+          v.layer = maxlayer;
+        }
+      }
+      // from now on, the LayeredDigraphLayout will think that the Node is bigger than it really is
+      // (other than the ones that are the widest or tallest in their respective layer).
+    }
+
+    commitLayout() {
+      super.commitLayout();
+      for (var it = this.network.edges.iterator; it.next();) {
+        var link = it.value.link;
+        if (link && link.curve === go.Link.Bezier) {
+          // depend on Link.adjusting === go.Link.End to fix up the end points of the links
+          // without losing the intermediate points of the route as determined by LayeredDigraphLayout
+          link.invalidateRoute();
+        }
+      }
+    }
+  }
+  // end of SankeyLayout
+
+    function init() {
+
+      // Since 2.2 you can also author concise templates with method chaining instead of GraphObject.make
+      // For details, see https://gojs.net/latest/intro/buildingObjects.html
+      const $ = go.GraphObject.make;  // for conciseness in defining templates
+
+      myDiagram =
+        new go.Diagram("myDiagramDiv", // the ID of the DIV HTML element
+          {
+            initialAutoScale: go.Diagram.UniformToFill,
+            "animationManager.isEnabled": false,
+            layout: $(SankeyLayout,
+              {
+                setsPortSpots: false,  // to allow the "Side" spots on the nodes to take effect
+                direction: 0,  // rightwards
+                layeringOption: go.LayeredDigraphLayout.LayerOptimalLinkLength,
+                packOption: go.LayeredDigraphLayout.PackStraighten || go.LayeredDigraphLayout.PackMedian,
+                layerSpacing: 100,  // lots of space between layers, for nicer thick links
+                columnSpacing: 1
+              })
+          });
+
+      var colors = ["#AC193D/#BF1E4B", "#2672EC/#2E8DEF", "#8C0095/#A700AE", "#5133AB/#643EBF", "#008299/#00A0B1", "#D24726/#DC572E", "#008A00/#00A600", "#094AB2/#0A5BC4"];
+
+      // this function provides a common style for the TextBlocks
+      function textStyle() {
+        return { font: "bold 12pt Segoe UI, sans-serif", stroke: "black", margin: 5 };
+      }
+
+      // define the Node template
+      myDiagram.nodeTemplate =
+        $(go.Node, go.Panel.Horizontal,
+          {
+            locationObjectName: "SHAPE",
+            locationSpot: go.Spot.Left,
+            portSpreading: go.Node.SpreadingPacked  // rather than the default go.Node.SpreadingEvenly
+          },
+          $(go.TextBlock, textStyle(),
+            { name: "LTEXT" },
+            new go.Binding("text", "ltext")),
+          $(go.Shape,
+            {
+              name: "SHAPE",
+              fill: "#2E8DEF",  // default fill color
+              strokeWidth: 0,
+              portId: "",
+              fromSpot: go.Spot.RightSide,
+              toSpot: go.Spot.LeftSide,
+              height: 10,
+              width: 20
+            },
+            new go.Binding("fill", "color")),
+          $(go.TextBlock, textStyle(),
+            { name: "TEXT" },
+            new go.Binding("text"))
+        );
+
+      function getAutoLinkColor(data) {
+        var nodedata = myDiagram.model.findNodeDataForKey(data.from);
+        var hex = nodedata.color;
+        if (hex.charAt(0) == '#') {
+          var rgb = parseInt(hex.slice(1, 7), 16);
+          var r = rgb >> 16;
+          var g = rgb >> 8 & 0xFF;
+          var b = rgb & 0xFF;
+          var alpha = 0.4;
+          if (data.width <= 2) alpha = 1;
+          var rgba = "rgba(" + r + "," + g + "," + b + ", " + alpha + ")";
+          return rgba;
+        }
+        return "rgba(173, 173, 173, 0.25)";
+      }
+
+      // define the Link template
+      var linkSelectionAdornmentTemplate =
+        $(go.Adornment, "Link",
+          $(go.Shape,
+            { isPanelMain: true, fill: null, stroke: "rgba(0, 0, 255, 0.3)", strokeWidth: 0 })  // use selection object's strokeWidth
+        );
+
+      myDiagram.linkTemplate =
+        $(go.Link, go.Link.Bezier,
+          {
+            selectionAdornmentTemplate: linkSelectionAdornmentTemplate,
+            layerName: "Background",
+            fromEndSegmentLength: 150, toEndSegmentLength: 150,
+            adjusting: go.Link.End
+          },
+          $(go.Shape, { strokeWidth: 4, stroke: "rgba(173, 173, 173, 0.25)" },
+            new go.Binding("stroke", "", getAutoLinkColor),
+            new go.Binding("strokeWidth", "width"))
+        );
+
+      // read in the JSON-format data from the "mySavedModel" element
+      load();
+    }
+
+    function load() {
+      myDiagram.model = go.Model.fromJson(document.getElementById("mySavedModel").value);
+    }
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+
+<div id="sample">
+  <div id="myDiagramDiv" style="border: 1px solid black; width: 99%; height: 850px; position: relative; -webkit-tap-highlight-color: rgba(255, 255, 255, 0);"><canvas tabindex="0" width="1542" height="1038" style="position: absolute; top: 0px; left: 0px; z-index: 2; user-select: none; touch-action: none; width: 1234px; height: 831px;"></canvas><div style="position: absolute; overflow: auto; width: 1234px; height: 848px; z-index: 1;"><div style="position: absolute; width: 1325.51px; height: 1px;"></div></div></div>
+  <p>
+    A Sankey diagram is a type of flow diagram where the Link thickness is proportional to the flow quantity.
+  </p>
+  <div>
+    <div>
+      <button onclick="load()">Read</button>
+    </div>
+    <textarea id="mySavedModel" style="width:100%;height:250px">{ "class": "go.GraphLinksModel",
+  "nodeDataArray": [
+{"key":"Coal reserves", "text":"Coal reserves", "color":"#9d75c2"},
+{"key":"Coal imports", "text":"Coal imports", "color":"#9d75c2"},
+{"key":"Oil reserves", "text":"Oil\nreserves", "color":"#9d75c2"},
+{"key":"Oil imports", "text":"Oil imports", "color":"#9d75c2"},
+{"key":"Gas reserves", "text":"Gas reserves", "color":"#a1e194"},
+{"key":"Gas imports", "text":"Gas imports", "color":"#a1e194"},
+{"key":"UK land based bioenergy", "text":"UK land based bioenergy", "color":"#f6bcd5"},
+{"key":"Marine algae", "text":"Marine algae", "color":"#681313"},
+{"key":"Agricultural 'waste'", "text":"Agricultural 'waste'", "color":"#3483ba"},
+{"key":"Other waste", "text":"Other waste", "color":"#c9b7d8"},
+{"key":"Biomass imports", "text":"Biomass imports", "color":"#fea19f"},
+{"key":"Biofuel imports", "text":"Biofuel imports", "color":"#d93c3c"},
+{"key":"Coal", "text":"Coal", "color":"#9d75c2"},
+{"key":"Oil", "text":"Oil", "color":"#9d75c2"},
+{"key":"Natural gas", "text":"Natural\ngas", "color":"#a6dce6"},
+{"key":"Solar", "text":"Solar", "color":"#c9a59d"},
+{"key":"Solar PV", "text":"Solar PV", "color":"#c9a59d"},
+{"key":"Bio-conversion", "text":"Bio-conversion", "color":"#b5cbe9"},
+{"key":"Solid", "text":"Solid", "color":"#40a840"},
+{"key":"Liquid", "text":"Liquid", "color":"#fe8b25"},
+{"key":"Gas", "text":"Gas", "color":"#a1e194"},
+{"key":"Nuclear", "text":"Nuclear", "color":"#fea19f"},
+{"key":"Thermal generation", "text":"Thermal\ngeneration", "color":"#3483ba"},
+{"key":"CHP", "text":"CHP", "color":"yellow"},
+{"key":"Electricity imports", "text":"Electricity imports", "color":"yellow"},
+{"key":"Wind", "text":"Wind", "color":"#cbcbcb"},
+{"key":"Tidal", "text":"Tidal", "color":"#6f3a5f"},
+{"key":"Wave", "text":"Wave", "color":"#8b8b8b"},
+{"key":"Geothermal", "text":"Geothermal", "color":"#556171"},
+{"key":"Hydro", "text":"Hydro", "color":"#7c3e06"},
+{"key":"Electricity grid", "text":"Electricity grid", "color":"#e483c7"},
+{"key":"H2 conversion", "text":"H2 conversion", "color":"#868686"},
+{"key":"Solar Thermal", "text":"Solar Thermal", "color":"#c9a59d"},
+{"key":"H2", "text":"H2", "color":"#868686"},
+{"key":"Pumped heat", "text":"Pumped heat", "color":"#96665c"},
+{"key":"District heating", "text":"District heating", "color":"#c9b7d8"},
+{"key":"Losses", "ltext":"Losses", "color":"#fec184"},
+{"key":"Over generation / exports", "ltext":"Over generation / exports", "color":"#f6bcd5"},
+{"key":"Heating and cooling - homes", "ltext":"Heating and cooling - homes", "color":"#c7a39b"},
+{"key":"Road transport", "ltext":"Road transport", "color":"#cbcbcb"},
+{"key":"Heating and cooling - commercial", "ltext":"Heating and cooling - commercial", "color":"#c9a59d"},
+{"key":"Industry", "ltext":"Industry", "color":"#96665c"},
+{"key":"Lighting &amp; appliances - homes", "ltext":"Lighting &amp; appliances - homes", "color":"#2dc3d2"},
+{"key":"Lighting &amp; appliances - commercial", "ltext":"Lighting &amp; appliances - commercial", "color":"#2dc3d2"},
+{"key":"Agriculture", "ltext":"Agriculture", "color":"#5c5c10"},
+{"key":"Rail transport", "ltext":"Rail transport", "color":"#6b6b45"},
+{"key":"Domestic aviation", "ltext":"Domestic aviation", "color":"#40a840"},
+{"key":"National navigation", "ltext":"National navigation", "color":"#a1e194"},
+{"key":"International aviation", "ltext":"International aviation", "color":"#fec184"},
+{"key":"International shipping", "ltext":"International shipping", "color":"#fec184"},
+{"key":"Geosequestration", "ltext":"Geosequestration", "color":"#fec184"}
+    ], "linkDataArray": [
+{"from":"Coal reserves", "to":"Coal", "width":31},
+{"from":"Coal imports", "to":"Coal", "width":86},
+{"from":"Oil reserves", "to":"Oil", "width":244},
+{"from":"Oil imports", "to":"Oil", "width":1},
+{"from":"Gas reserves", "to":"Natural gas", "width":182},
+{"from":"Gas imports", "to":"Natural gas", "width":61},
+{"from":"UK land based bioenergy", "to":"Bio-conversion", "width":1},
+{"from":"Marine algae", "to":"Bio-conversion", "width":1},
+{"from":"Agricultural 'waste'", "to":"Bio-conversion", "width":1},
+{"from":"Other waste", "to":"Bio-conversion", "width":8},
+{"from":"Other waste", "to":"Solid", "width":1},
+{"from":"Biomass imports", "to":"Solid", "width":1},
+{"from":"Biofuel imports", "to":"Liquid", "width":1},
+{"from":"Coal", "to":"Solid", "width":117},
+{"from":"Oil", "to":"Liquid", "width":244},
+{"from":"Natural gas", "to":"Gas", "width":244},
+{"from":"Solar", "to":"Solar PV", "width":1},
+{"from":"Solar PV", "to":"Electricity grid", "width":1},
+{"from":"Solar", "to":"Solar Thermal", "width":1},
+{"from":"Bio-conversion", "to":"Solid", "width":3},
+{"from":"Bio-conversion", "to":"Liquid", "width":1},
+{"from":"Bio-conversion", "to":"Gas", "width":5},
+{"from":"Bio-conversion", "to":"Losses", "width":1},
+{"from":"Solid", "to":"Over generation / exports", "width":1},
+{"from":"Liquid", "to":"Over generation / exports", "width":18},
+{"from":"Gas", "to":"Over generation / exports", "width":1},
+{"from":"Solid", "to":"Thermal generation", "width":106},
+{"from":"Liquid", "to":"Thermal generation", "width":2},
+{"from":"Gas", "to":"Thermal generation", "width":87},
+{"from":"Nuclear", "to":"Thermal generation", "width":41},
+{"from":"Thermal generation", "to":"District heating", "width":2},
+{"from":"Thermal generation", "to":"Electricity grid", "width":92},
+{"from":"Thermal generation", "to":"Losses", "width":142},
+{"from":"Solid", "to":"CHP", "width":1},
+{"from":"Liquid", "to":"CHP", "width":1},
+{"from":"Gas", "to":"CHP", "width":1},
+{"from":"CHP", "to":"Electricity grid", "width":1},
+{"from":"CHP", "to":"Losses", "width":1},
+{"from":"Electricity imports", "to":"Electricity grid", "width":1},
+{"from":"Wind", "to":"Electricity grid", "width":1},
+{"from":"Tidal", "to":"Electricity grid", "width":1},
+{"from":"Wave", "to":"Electricity grid", "width":1},
+{"from":"Geothermal", "to":"Electricity grid", "width":1},
+{"from":"Hydro", "to":"Electricity grid", "width":1},
+{"from":"Electricity grid", "to":"H2 conversion", "width":1},
+{"from":"Electricity grid", "to":"Over generation / exports", "width":1},
+{"from":"Electricity grid", "to":"Losses", "width":6},
+{"from":"Gas", "to":"H2 conversion", "width":1},
+{"from":"H2 conversion", "to":"H2", "width":1},
+{"from":"H2 conversion", "to":"Losses", "width":1},
+{"from":"Solar Thermal", "to":"Heating and cooling - homes", "width":1},
+{"from":"H2", "to":"Road transport", "width":1},
+{"from":"Pumped heat", "to":"Heating and cooling - homes", "width":1},
+{"from":"Pumped heat", "to":"Heating and cooling - commercial", "width":1},
+{"from":"CHP", "to":"Heating and cooling - homes", "width":1},
+{"from":"CHP", "to":"Heating and cooling - commercial", "width":1},
+{"from":"District heating", "to":"Heating and cooling - homes", "width":1},
+{"from":"District heating", "to":"Heating and cooling - commercial", "width":1},
+{"from":"District heating", "to":"Industry", "width":2},
+{"from":"Electricity grid", "to":"Heating and cooling - homes", "width":7},
+{"from":"Solid", "to":"Heating and cooling - homes", "width":3},
+{"from":"Liquid", "to":"Heating and cooling - homes", "width":3},
+{"from":"Gas", "to":"Heating and cooling - homes", "width":81},
+{"from":"Electricity grid", "to":"Heating and cooling - commercial", "width":7},
+{"from":"Solid", "to":"Heating and cooling - commercial", "width":1},
+{"from":"Liquid", "to":"Heating and cooling - commercial", "width":2},
+{"from":"Gas", "to":"Heating and cooling - commercial", "width":19},
+{"from":"Electricity grid", "to":"Lighting &amp; appliances - homes", "width":21},
+{"from":"Gas", "to":"Lighting &amp; appliances - homes", "width":2},
+{"from":"Electricity grid", "to":"Lighting &amp; appliances - commercial", "width":18},
+{"from":"Gas", "to":"Lighting &amp; appliances - commercial", "width":2},
+{"from":"Electricity grid", "to":"Industry", "width":30},
+{"from":"Solid", "to":"Industry", "width":13},
+{"from":"Liquid", "to":"Industry", "width":34},
+{"from":"Gas", "to":"Industry", "width":54},
+{"from":"Electricity grid", "to":"Agriculture", "width":1},
+{"from":"Solid", "to":"Agriculture", "width":1},
+{"from":"Liquid", "to":"Agriculture", "width":1},
+{"from":"Gas", "to":"Agriculture", "width":1},
+{"from":"Electricity grid", "to":"Road transport", "width":1},
+{"from":"Liquid", "to":"Road transport", "width":122},
+{"from":"Electricity grid", "to":"Rail transport", "width":2},
+{"from":"Liquid", "to":"Rail transport", "width":1},
+{"from":"Liquid", "to":"Domestic aviation", "width":2},
+{"from":"Liquid", "to":"National navigation", "width":4},
+{"from":"Liquid", "to":"International aviation", "width":38},
+{"from":"Liquid", "to":"International shipping", "width":13},
+{"from":"Electricity grid", "to":"Geosequestration", "width":1},
+{"from":"Gas", "to":"Losses", "width":2}
+ ]}
+    </textarea>
+  </div>
+  This sample demonstrates one way of generating a Sankey or flow diagram.
+  The data was derived from <a href="https://tamc.github.io/Sankey/">https://tamc.github.io/Sankey/</a>.
+<p class="text-xs">GoJS version 2.3.14. Copyright 1998-2023 by Northwoods Software.</p></div>
+    <p><a href="https://github.com/NorthwoodsSoftware/GoJS/blob/master/samples/sankey.html" target="_blank">View this sample page's source on GitHub</a></p><pre class=" language-js">
+  <span class="token keyword">class</span> <span class="token class-name">SankeyLayout</span> <span class="token keyword">extends</span> <span class="token class-name">go<span class="token punctuation">.</span>LayeredDigraphLayout</span> <span class="token punctuation">{</span>
+    <span class="token function">constructor</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">super</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">this</span><span class="token punctuation">.</span>alignOption <span class="token operator">=</span> go<span class="token punctuation">.</span>LayeredDigraphLayout<span class="token punctuation">.</span>AlignAll<span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    <span class="token comment">// determine the desired height of each node/vertex,</span>
+    <span class="token comment">// based on the thicknesses of the connected links;</span>
+    <span class="token comment">// actually modify the height of each node's SHAPE</span>
+    <span class="token function">makeNetwork</span><span class="token punctuation">(</span><span class="token parameter">coll</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">var</span> net <span class="token operator">=</span> <span class="token keyword">super</span><span class="token punctuation">.</span><span class="token function">makeNetwork</span><span class="token punctuation">(</span>coll<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">this</span><span class="token punctuation">.</span>diagram<span class="token punctuation">.</span>nodes<span class="token punctuation">.</span><span class="token function">each</span><span class="token punctuation">(</span><span class="token parameter">node</span> <span class="token operator">=&gt;</span> <span class="token punctuation">{</span>
+        <span class="token comment">// figure out how tall the node's bar should be</span>
+        <span class="token keyword">var</span> height <span class="token operator">=</span> <span class="token keyword">this</span><span class="token punctuation">.</span><span class="token function">getAutoHeightForNode</span><span class="token punctuation">(</span>node<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">var</span> shape <span class="token operator">=</span> node<span class="token punctuation">.</span><span class="token function">findObject</span><span class="token punctuation">(</span><span class="token string">"SHAPE"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>shape<span class="token punctuation">)</span> shape<span class="token punctuation">.</span>height <span class="token operator">=</span> height<span class="token punctuation">;</span>
+        <span class="token keyword">var</span> text <span class="token operator">=</span> node<span class="token punctuation">.</span><span class="token function">findObject</span><span class="token punctuation">(</span><span class="token string">"TEXT"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">var</span> ltext <span class="token operator">=</span> node<span class="token punctuation">.</span><span class="token function">findObject</span><span class="token punctuation">(</span><span class="token string">"LTEXT"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">var</span> font <span class="token operator">=</span> <span class="token string">"bold "</span> <span class="token operator">+</span> Math<span class="token punctuation">.</span><span class="token function">max</span><span class="token punctuation">(</span><span class="token number">12</span><span class="token punctuation">,</span> Math<span class="token punctuation">.</span><span class="token function">round</span><span class="token punctuation">(</span>height <span class="token operator">/</span> <span class="token number">8</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token operator">+</span> <span class="token string">"pt Segoe UI, sans-serif"</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>text<span class="token punctuation">)</span> text<span class="token punctuation">.</span>font <span class="token operator">=</span> font<span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>ltext<span class="token punctuation">)</span> ltext<span class="token punctuation">.</span>font <span class="token operator">=</span> font<span class="token punctuation">;</span>
+        <span class="token comment">// and update the vertex's dimensions accordingly</span>
+        <span class="token keyword">var</span> v <span class="token operator">=</span> net<span class="token punctuation">.</span><span class="token function">findVertex</span><span class="token punctuation">(</span>node<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>v <span class="token operator">!==</span> <span class="token keyword">null</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          node<span class="token punctuation">.</span><span class="token function">ensureBounds</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> r <span class="token operator">=</span> node<span class="token punctuation">.</span>actualBounds<span class="token punctuation">;</span>
+          v<span class="token punctuation">.</span>width <span class="token operator">=</span> r<span class="token punctuation">.</span>width<span class="token punctuation">;</span>
+          v<span class="token punctuation">.</span>height <span class="token operator">=</span> r<span class="token punctuation">.</span>height<span class="token punctuation">;</span>
+          v<span class="token punctuation">.</span>focusY <span class="token operator">=</span> v<span class="token punctuation">.</span>height<span class="token operator">/</span><span class="token number">2</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">return</span> net<span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token function">getAutoHeightForNode</span><span class="token punctuation">(</span><span class="token parameter">node</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">var</span> heightIn <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+      <span class="token keyword">var</span> it <span class="token operator">=</span> node<span class="token punctuation">.</span><span class="token function">findLinksInto</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+      <span class="token keyword">while</span> <span class="token punctuation">(</span>it<span class="token punctuation">.</span><span class="token function">next</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">var</span> link <span class="token operator">=</span> it<span class="token punctuation">.</span>value<span class="token punctuation">;</span>
+        heightIn <span class="token operator">+=</span> link<span class="token punctuation">.</span><span class="token function">computeThickness</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+      <span class="token keyword">var</span> heightOut <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+      <span class="token keyword">var</span> it <span class="token operator">=</span> node<span class="token punctuation">.</span><span class="token function">findLinksOutOf</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+      <span class="token keyword">while</span> <span class="token punctuation">(</span>it<span class="token punctuation">.</span><span class="token function">next</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">var</span> link <span class="token operator">=</span> it<span class="token punctuation">.</span>value<span class="token punctuation">;</span>
+        heightOut <span class="token operator">+=</span> link<span class="token punctuation">.</span><span class="token function">computeThickness</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+      <span class="token keyword">var</span> h <span class="token operator">=</span> Math<span class="token punctuation">.</span><span class="token function">max</span><span class="token punctuation">(</span>heightIn<span class="token punctuation">,</span> heightOut<span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>h <span class="token operator">&lt;</span> <span class="token number">10</span><span class="token punctuation">)</span> h <span class="token operator">=</span> <span class="token number">10</span><span class="token punctuation">;</span>
+      <span class="token keyword">return</span> h<span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">// treat dummy vertexes as having the thickness of the link that they are in</span>
+    <span class="token function">nodeMinColumnSpace</span><span class="token punctuation">(</span><span class="token parameter">v<span class="token punctuation">,</span> topleft</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>v<span class="token punctuation">.</span>node <span class="token operator">===</span> <span class="token keyword">null</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>v<span class="token punctuation">.</span>edgesCount <span class="token operator">&gt;=</span> <span class="token number">1</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token keyword">var</span> max <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> it <span class="token operator">=</span> v<span class="token punctuation">.</span>edges<span class="token punctuation">;</span>
+          <span class="token keyword">while</span> <span class="token punctuation">(</span>it<span class="token punctuation">.</span><span class="token function">next</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+            <span class="token keyword">var</span> edge <span class="token operator">=</span> it<span class="token punctuation">.</span>value<span class="token punctuation">;</span>
+            <span class="token keyword">if</span> <span class="token punctuation">(</span>edge<span class="token punctuation">.</span>link <span class="token operator">!=</span> <span class="token keyword">null</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+              <span class="token keyword">var</span> t <span class="token operator">=</span> edge<span class="token punctuation">.</span>link<span class="token punctuation">.</span><span class="token function">computeThickness</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+              <span class="token keyword">if</span> <span class="token punctuation">(</span>t <span class="token operator">&gt;</span> max<span class="token punctuation">)</span> max <span class="token operator">=</span> t<span class="token punctuation">;</span>
+              <span class="token keyword">break</span><span class="token punctuation">;</span>
+            <span class="token punctuation">}</span>
+          <span class="token punctuation">}</span>
+          <span class="token keyword">return</span> Math<span class="token punctuation">.</span><span class="token function">max</span><span class="token punctuation">(</span><span class="token number">2</span><span class="token punctuation">,</span> Math<span class="token punctuation">.</span><span class="token function">ceil</span><span class="token punctuation">(</span>max <span class="token operator">/</span> <span class="token keyword">this</span><span class="token punctuation">.</span>columnSpacing<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        <span class="token keyword">return</span> <span class="token number">2</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+      <span class="token keyword">return</span> <span class="token keyword">super</span><span class="token punctuation">.</span><span class="token function">nodeMinColumnSpace</span><span class="token punctuation">(</span>v<span class="token punctuation">,</span> topleft<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token comment">// treat dummy vertexes as being thicker, so that the Bezier curves are gentler</span>
+    <span class="token function">nodeMinLayerSpace</span><span class="token punctuation">(</span><span class="token parameter">v<span class="token punctuation">,</span> topleft</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">if</span> <span class="token punctuation">(</span>v<span class="token punctuation">.</span>node <span class="token operator">===</span> <span class="token keyword">null</span><span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token number">100</span><span class="token punctuation">;</span>
+      <span class="token keyword">return</span> <span class="token keyword">super</span><span class="token punctuation">.</span><span class="token function">nodeMinLayerSpace</span><span class="token punctuation">(</span>v<span class="token punctuation">,</span> topleft<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token function">assignLayers</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">super</span><span class="token punctuation">.</span><span class="token function">assignLayers</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">var</span> maxlayer <span class="token operator">=</span> <span class="token keyword">this</span><span class="token punctuation">.</span>maxLayer<span class="token punctuation">;</span>
+      <span class="token comment">// now make sure every vertex with no outputs is maxlayer</span>
+      <span class="token keyword">for</span> <span class="token punctuation">(</span><span class="token keyword">var</span> it <span class="token operator">=</span> <span class="token keyword">this</span><span class="token punctuation">.</span>network<span class="token punctuation">.</span>vertexes<span class="token punctuation">.</span>iterator<span class="token punctuation">;</span> it<span class="token punctuation">.</span><span class="token function">next</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">var</span> v <span class="token operator">=</span> it<span class="token punctuation">.</span>value<span class="token punctuation">;</span>
+        <span class="token keyword">var</span> node <span class="token operator">=</span> v<span class="token punctuation">.</span>node<span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>v<span class="token punctuation">.</span>destinationVertexes<span class="token punctuation">.</span>count <span class="token operator">==</span> <span class="token number">0</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          v<span class="token punctuation">.</span>layer <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>v<span class="token punctuation">.</span>sourceVertexes<span class="token punctuation">.</span>count <span class="token operator">==</span> <span class="token number">0</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          v<span class="token punctuation">.</span>layer <span class="token operator">=</span> maxlayer<span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span>
+      <span class="token comment">// from now on, the LayeredDigraphLayout will think that the Node is bigger than it really is</span>
+      <span class="token comment">// (other than the ones that are the widest or tallest in their respective layer).</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token function">commitLayout</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      <span class="token keyword">super</span><span class="token punctuation">.</span><span class="token function">commitLayout</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+      <span class="token keyword">for</span> <span class="token punctuation">(</span><span class="token keyword">var</span> it <span class="token operator">=</span> <span class="token keyword">this</span><span class="token punctuation">.</span>network<span class="token punctuation">.</span>edges<span class="token punctuation">.</span>iterator<span class="token punctuation">;</span> it<span class="token punctuation">.</span><span class="token function">next</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">var</span> link <span class="token operator">=</span> it<span class="token punctuation">.</span>value<span class="token punctuation">.</span>link<span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>link <span class="token operator">&amp;&amp;</span> link<span class="token punctuation">.</span>curve <span class="token operator">===</span> go<span class="token punctuation">.</span>Link<span class="token punctuation">.</span>Bezier<span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token comment">// depend on Link.adjusting === go.Link.End to fix up the end points of the links</span>
+          <span class="token comment">// without losing the intermediate points of the route as determined by LayeredDigraphLayout</span>
+          link<span class="token punctuation">.</span><span class="token function">invalidateRoute</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+      <span class="token punctuation">}</span>
+    <span class="token punctuation">}</span>
+  <span class="token punctuation">}</span>
+  <span class="token comment">// end of SankeyLayout</span>
+
+    <span class="token keyword">function</span> <span class="token function">init</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+
+      <span class="token comment">// Since 2.2 you can also author concise templates with method chaining instead of GraphObject.make</span>
+      <span class="token comment">// For details, see https://gojs.net/latest/intro/buildingObjects.html</span>
+      <span class="token keyword">const</span> $ <span class="token operator">=</span> go<span class="token punctuation">.</span>GraphObject<span class="token punctuation">.</span>make<span class="token punctuation">;</span>  <span class="token comment">// for conciseness in defining templates</span>
+
+      myDiagram <span class="token operator">=</span>
+        <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Diagram</span><span class="token punctuation">(</span><span class="token string">"myDiagramDiv"</span><span class="token punctuation">,</span> <span class="token comment">// the ID of the DIV HTML element</span>
+          <span class="token punctuation">{</span>
+            initialAutoScale<span class="token operator">:</span> go<span class="token punctuation">.</span>Diagram<span class="token punctuation">.</span>UniformToFill<span class="token punctuation">,</span>
+            <span class="token string">"animationManager.isEnabled"</span><span class="token operator">:</span> <span class="token boolean">false</span><span class="token punctuation">,</span>
+            layout<span class="token operator">:</span> <span class="token function">$</span><span class="token punctuation">(</span>SankeyLayout<span class="token punctuation">,</span>
+              <span class="token punctuation">{</span>
+                setsPortSpots<span class="token operator">:</span> <span class="token boolean">false</span><span class="token punctuation">,</span>  <span class="token comment">// to allow the "Side" spots on the nodes to take effect</span>
+                direction<span class="token operator">:</span> <span class="token number">0</span><span class="token punctuation">,</span>  <span class="token comment">// rightwards</span>
+                layeringOption<span class="token operator">:</span> go<span class="token punctuation">.</span>LayeredDigraphLayout<span class="token punctuation">.</span>LayerOptimalLinkLength<span class="token punctuation">,</span>
+                packOption<span class="token operator">:</span> go<span class="token punctuation">.</span>LayeredDigraphLayout<span class="token punctuation">.</span>PackStraighten <span class="token operator">||</span> go<span class="token punctuation">.</span>LayeredDigraphLayout<span class="token punctuation">.</span>PackMedian<span class="token punctuation">,</span>
+                layerSpacing<span class="token operator">:</span> <span class="token number">100</span><span class="token punctuation">,</span>  <span class="token comment">// lots of space between layers, for nicer thick links</span>
+                columnSpacing<span class="token operator">:</span> <span class="token number">1</span>
+              <span class="token punctuation">}</span><span class="token punctuation">)</span>
+          <span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+      <span class="token keyword">var</span> colors <span class="token operator">=</span> <span class="token punctuation">[</span><span class="token string">"#AC193D/#BF1E4B"</span><span class="token punctuation">,</span> <span class="token string">"#2672EC/#2E8DEF"</span><span class="token punctuation">,</span> <span class="token string">"#8C0095/#A700AE"</span><span class="token punctuation">,</span> <span class="token string">"#5133AB/#643EBF"</span><span class="token punctuation">,</span> <span class="token string">"#008299/#00A0B1"</span><span class="token punctuation">,</span> <span class="token string">"#D24726/#DC572E"</span><span class="token punctuation">,</span> <span class="token string">"#008A00/#00A600"</span><span class="token punctuation">,</span> <span class="token string">"#094AB2/#0A5BC4"</span><span class="token punctuation">]</span><span class="token punctuation">;</span>
+
+      <span class="token comment">// this function provides a common style for the TextBlocks</span>
+      <span class="token keyword">function</span> <span class="token function">textStyle</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">return</span> <span class="token punctuation">{</span> font<span class="token operator">:</span> <span class="token string">"bold 12pt Segoe UI, sans-serif"</span><span class="token punctuation">,</span> stroke<span class="token operator">:</span> <span class="token string">"black"</span><span class="token punctuation">,</span> margin<span class="token operator">:</span> <span class="token number">5</span> <span class="token punctuation">}</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+
+      <span class="token comment">// define the Node template</span>
+      myDiagram<span class="token punctuation">.</span>nodeTemplate <span class="token operator">=</span>
+        <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Node<span class="token punctuation">,</span> go<span class="token punctuation">.</span>Panel<span class="token punctuation">.</span>Horizontal<span class="token punctuation">,</span>
+          <span class="token punctuation">{</span>
+            locationObjectName<span class="token operator">:</span> <span class="token string">"SHAPE"</span><span class="token punctuation">,</span>
+            locationSpot<span class="token operator">:</span> go<span class="token punctuation">.</span>Spot<span class="token punctuation">.</span>Left<span class="token punctuation">,</span>
+            portSpreading<span class="token operator">:</span> go<span class="token punctuation">.</span>Node<span class="token punctuation">.</span>SpreadingPacked  <span class="token comment">// rather than the default go.Node.SpreadingEvenly</span>
+          <span class="token punctuation">}</span><span class="token punctuation">,</span>
+          <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>TextBlock<span class="token punctuation">,</span> <span class="token function">textStyle</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+            <span class="token punctuation">{</span> name<span class="token operator">:</span> <span class="token string">"LTEXT"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+            <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Binding</span><span class="token punctuation">(</span><span class="token string">"text"</span><span class="token punctuation">,</span> <span class="token string">"ltext"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+          <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Shape<span class="token punctuation">,</span>
+            <span class="token punctuation">{</span>
+              name<span class="token operator">:</span> <span class="token string">"SHAPE"</span><span class="token punctuation">,</span>
+              fill<span class="token operator">:</span> <span class="token string">"#2E8DEF"</span><span class="token punctuation">,</span>  <span class="token comment">// default fill color</span>
+              strokeWidth<span class="token operator">:</span> <span class="token number">0</span><span class="token punctuation">,</span>
+              portId<span class="token operator">:</span> <span class="token string">""</span><span class="token punctuation">,</span>
+              fromSpot<span class="token operator">:</span> go<span class="token punctuation">.</span>Spot<span class="token punctuation">.</span>RightSide<span class="token punctuation">,</span>
+              toSpot<span class="token operator">:</span> go<span class="token punctuation">.</span>Spot<span class="token punctuation">.</span>LeftSide<span class="token punctuation">,</span>
+              height<span class="token operator">:</span> <span class="token number">10</span><span class="token punctuation">,</span>
+              width<span class="token operator">:</span> <span class="token number">20</span>
+            <span class="token punctuation">}</span><span class="token punctuation">,</span>
+            <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Binding</span><span class="token punctuation">(</span><span class="token string">"fill"</span><span class="token punctuation">,</span> <span class="token string">"color"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+          <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>TextBlock<span class="token punctuation">,</span> <span class="token function">textStyle</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+            <span class="token punctuation">{</span> name<span class="token operator">:</span> <span class="token string">"TEXT"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+            <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Binding</span><span class="token punctuation">(</span><span class="token string">"text"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+        <span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+      <span class="token keyword">function</span> <span class="token function">getAutoLinkColor</span><span class="token punctuation">(</span><span class="token parameter">data</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+        <span class="token keyword">var</span> nodedata <span class="token operator">=</span> myDiagram<span class="token punctuation">.</span>model<span class="token punctuation">.</span><span class="token function">findNodeDataForKey</span><span class="token punctuation">(</span>data<span class="token punctuation">.</span>from<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token keyword">var</span> hex <span class="token operator">=</span> nodedata<span class="token punctuation">.</span>color<span class="token punctuation">;</span>
+        <span class="token keyword">if</span> <span class="token punctuation">(</span>hex<span class="token punctuation">.</span><span class="token function">charAt</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">)</span> <span class="token operator">==</span> <span class="token string">'#'</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+          <span class="token keyword">var</span> rgb <span class="token operator">=</span> <span class="token function">parseInt</span><span class="token punctuation">(</span>hex<span class="token punctuation">.</span><span class="token function">slice</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">7</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">16</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> r <span class="token operator">=</span> rgb <span class="token operator">&gt;&gt;</span> <span class="token number">16</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> g <span class="token operator">=</span> rgb <span class="token operator">&gt;&gt;</span> <span class="token number">8</span> <span class="token operator">&amp;</span> <span class="token number">0xFF</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> b <span class="token operator">=</span> rgb <span class="token operator">&amp;</span> <span class="token number">0xFF</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> alpha <span class="token operator">=</span> <span class="token number">0.4</span><span class="token punctuation">;</span>
+          <span class="token keyword">if</span> <span class="token punctuation">(</span>data<span class="token punctuation">.</span>width <span class="token operator">&lt;=</span> <span class="token number">2</span><span class="token punctuation">)</span> alpha <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span>
+          <span class="token keyword">var</span> rgba <span class="token operator">=</span> <span class="token string">"rgba("</span> <span class="token operator">+</span> r <span class="token operator">+</span> <span class="token string">","</span> <span class="token operator">+</span> g <span class="token operator">+</span> <span class="token string">","</span> <span class="token operator">+</span> b <span class="token operator">+</span> <span class="token string">", "</span> <span class="token operator">+</span> alpha <span class="token operator">+</span> <span class="token string">")"</span><span class="token punctuation">;</span>
+          <span class="token keyword">return</span> rgba<span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+        <span class="token keyword">return</span> <span class="token string">"rgba(173, 173, 173, 0.25)"</span><span class="token punctuation">;</span>
+      <span class="token punctuation">}</span>
+
+      <span class="token comment">// define the Link template</span>
+      <span class="token keyword">var</span> linkSelectionAdornmentTemplate <span class="token operator">=</span>
+        <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Adornment<span class="token punctuation">,</span> <span class="token string">"Link"</span><span class="token punctuation">,</span>
+          <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Shape<span class="token punctuation">,</span>
+            <span class="token punctuation">{</span> isPanelMain<span class="token operator">:</span> <span class="token boolean">true</span><span class="token punctuation">,</span> fill<span class="token operator">:</span> <span class="token keyword">null</span><span class="token punctuation">,</span> stroke<span class="token operator">:</span> <span class="token string">"rgba(0, 0, 255, 0.3)"</span><span class="token punctuation">,</span> strokeWidth<span class="token operator">:</span> <span class="token number">0</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>  <span class="token comment">// use selection object's strokeWidth</span>
+        <span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+      myDiagram<span class="token punctuation">.</span>linkTemplate <span class="token operator">=</span>
+        <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Link<span class="token punctuation">,</span> go<span class="token punctuation">.</span>Link<span class="token punctuation">.</span>Bezier<span class="token punctuation">,</span>
+          <span class="token punctuation">{</span>
+            selectionAdornmentTemplate<span class="token operator">:</span> linkSelectionAdornmentTemplate<span class="token punctuation">,</span>
+            layerName<span class="token operator">:</span> <span class="token string">"Background"</span><span class="token punctuation">,</span>
+            fromEndSegmentLength<span class="token operator">:</span> <span class="token number">150</span><span class="token punctuation">,</span> toEndSegmentLength<span class="token operator">:</span> <span class="token number">150</span><span class="token punctuation">,</span>
+            adjusting<span class="token operator">:</span> go<span class="token punctuation">.</span>Link<span class="token punctuation">.</span>End
+          <span class="token punctuation">}</span><span class="token punctuation">,</span>
+          <span class="token function">$</span><span class="token punctuation">(</span>go<span class="token punctuation">.</span>Shape<span class="token punctuation">,</span> <span class="token punctuation">{</span> strokeWidth<span class="token operator">:</span> <span class="token number">4</span><span class="token punctuation">,</span> stroke<span class="token operator">:</span> <span class="token string">"rgba(173, 173, 173, 0.25)"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+            <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Binding</span><span class="token punctuation">(</span><span class="token string">"stroke"</span><span class="token punctuation">,</span> <span class="token string">""</span><span class="token punctuation">,</span> getAutoLinkColor<span class="token punctuation">)</span><span class="token punctuation">,</span>
+            <span class="token keyword">new</span> <span class="token class-name">go<span class="token punctuation">.</span>Binding</span><span class="token punctuation">(</span><span class="token string">"strokeWidth"</span><span class="token punctuation">,</span> <span class="token string">"width"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+        <span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+      <span class="token comment">// read in the JSON-format data from the "mySavedModel" element</span>
+      <span class="token function">load</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+
+    <span class="token keyword">function</span> <span class="token function">load</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">{</span>
+      myDiagram<span class="token punctuation">.</span>model <span class="token operator">=</span> go<span class="token punctuation">.</span>Model<span class="token punctuation">.</span><span class="token function">fromJson</span><span class="token punctuation">(</span>document<span class="token punctuation">.</span><span class="token function">getElementById</span><span class="token punctuation">(</span><span class="token string">"mySavedModel"</span><span class="token punctuation">)</span><span class="token punctuation">.</span>value<span class="token punctuation">)</span><span class="token punctuation">;</span>
+    <span class="token punctuation">}</span>
+    window<span class="token punctuation">.</span><span class="token function">addEventListener</span><span class="token punctuation">(</span><span class="token string">'DOMContentLoaded'</span><span class="token punctuation">,</span> init<span class="token punctuation">)</span><span class="token punctuation">;</span>
+  </pre></div>
+  </body>
+  </html>
